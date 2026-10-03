@@ -1,0 +1,11 @@
+.vscode/
+__pycache__/
+.pytest_cache/
+obj/
+*.o
+*.a
+*.elf
+*.bin
+*.dis
+*.map
+*.zip

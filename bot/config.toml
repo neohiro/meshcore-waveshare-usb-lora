@@ -1,0 +1,52 @@
+# MeshCore bot over the Waveshare USB-TO-LoRa-HF dongle.
+#
+# The dongle runs the KISS modem firmware built from ../firmware, so the
+# connection scheme is "serial". MeshCore's protocol stack runs here on the PC;
+# the dongle is only the radio.
+#
+# Start with:  meshcore-bot --config config.toml
+# Monitor it with:  python ../tools/kissmon.py -p COM3 monitor
+
+connection = "serial://COM3"
+baudRate = 115200
+
+# MeshCore EU/UK (Narrow) preset. Must match the presets on the rest of your
+# mesh exactly, and the sync word is fixed in firmware at 0x12.
+freq = 869.618
+bw = 62.50
+sf = 8
+cr = 8
+tx = 17
+
+# EU868 allows 1% duty cycle. Leave the headroom generous rather than pushing
+# the limit and getting the node jammed.
+dutyCycle = 1
+
+[[bot]]
+name = "Test Bot"
+
+[[bot.trigger]]
+type = "channel"
+template = "pong from {{.BotName}} (hops={{.Hops}} snr={{.SNR}} rssi={{.RSSI}})"
+channels = ["#testing"]
+match = ["(?i)^ping", "(?i)^test"]
+
+[[bot.trigger]]
+type = "channel"
+template = "here. {{.Sender}}: {{.Text}}"
+channels = ["#testing"]
+match = ["(?i)^echo\\s+(.*)$"]
+
+# Uncomment to mirror observed traffic to LetsMesh.
+# [bot.mqtt]
+# name = "LetsMesh Observer"
+# iataCode = "xxxx"
+# statusInterval = 300
+#
+# [[bot.mqtt.broker]]
+# name = "letsmesh"
+# enabled = true
+# host = "mqtt.letsmesh.net"
+# port = 1883
+# topicPrefix = "meshcore"
+# dedup = true

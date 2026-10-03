@@ -1,0 +1,42 @@
+# EditorConfig keeps our own sources uniform. The policy is enforced by
+# tests/test_repo_hygiene.py, so it cannot silently drift.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{c,h}]
+indent_size = 4
+
+[*.{py,ps1,toml,go}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown, so leave them alone.
+trim_trailing_whitespace = false
+
+# Vendored trees are kept byte-for-byte as upstream shipped them, so that
+# diffs against those repositories stay clean.
+[firmware/rtos/**]
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[firmware/sx126x/**]
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[firmware/libopencm3/**]
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

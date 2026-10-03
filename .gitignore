@@ -1,0 +1,32 @@
+# Portable toolchain, fetched by tools/fetch-toolchain.ps1
+toolchain/
+tools/downloads/
+
+# Installed by tools/ci.ps1 for the end-to-end test
+tools/bin/
+
+# Build output
+firmware/obj/
+firmware/*.elf
+firmware/*.bin
+firmware/*.map
+firmware/libfreertos.a
+firmware/libsx126x.a
+firmware/libopencm3/
+
+__pycache__/
+*.pyc
+
+# Native test binaries, removed or rebuilt by tools/test.ps1 but ignored in
+# case of a crash
+tests/test-firmware.exe
+tests/kiss-server.exe
+tests/*.o
+
+# Go contract test
+tests/contract/contract.test
+tests/contract/*.exe
+
+# Bot state
+bot/*.key
+bot/*.bak-*
