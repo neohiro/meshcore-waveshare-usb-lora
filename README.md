@@ -925,6 +925,10 @@ authors, whose Go implementation is what the tests negotiate with.
 - **[libopencm3](https://libopencm3.org)** — the bare-metal library, vendored in
   `firmware/libopencm3/`, from the
   [libopencm3-template](https://github.com/libopencm3/libopencm3-template).
+  libopencm3 is LGPL-3.0, and that is the one licence here with obligations the
+  MIT below does not discharge: the firmware links it, so the LGPL terms apply to
+  the built `firmware.bin` and anyone redistributing it. The MIT licence covers
+  this repository's own code, not the vendored trees.
 - **[Waveshare](https://www.waveshare.com)** — the USB-TO-LoRa-HF board, and the
   schematics that established what is actually on it.
 - **[pyOCD](https://github.com/pyocd/pyOCD)** — CMSIS-DAP and ST-Link support,
