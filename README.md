@@ -160,8 +160,10 @@ Options worth knowing:
 
 A freshly flashed dongle is already on the MeshCore EU/UK narrow preset —
 869.618 MHz, SF8, 62.5 kHz, 4/8, 17 dBm — because `radio.c` applies those to the
-SX1262 before it waits for any command. So `kissmon.py -p COM3 monitor` can
-receive straight after flashing, without running `set-radio` first.
+SX1262 before it waits for any command. So `python tools\kissmon.py -p COM3
+monitor` can receive straight after flashing, without configuring the radio
+first. (The protocol operation is called `set-radio`; the kissmon command that
+performs it is `setradio`, with no hyphen.)
 `tests/test_bot_config.py` holds those defaults to `bot/config.toml`: the bot
 sends SetRadio when it connects, so a mismatch would not stop the bot, but it
 would leave the dongle listening on the wrong frequency for anything else.
