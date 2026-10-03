@@ -1,15 +1,21 @@
-"""kissmon's SetRadio payload, checked against the real firmware parser.
+"""kissmon's wire encodings, checked against the real firmware.
 
-`kissmon setradio` is in the README's manual sequence, and it is the one command
-whose bytes the test suite never checked. The contract tests drive SetRadio
-through meshcore-go's Go implementation, so a wrong layout in kissmon -- a field
-in the wrong order, a width off by one, big-endian where the firmware expects
-little -- would pass every test in this repository and then quietly do nothing
-when a user ran it.
+Every command in `kissmon info` -- the one a new user runs first -- puts bytes on
+the wire that nothing in this repository checked. The contract tests drive the
+same SetHardware commands through meshcore-go's Go implementation, so a wrong
+layout in kissmon -- a field in the wrong order, a width off by one, big-endian
+where the firmware expects little -- would pass every test here and then quietly
+do nothing, or something subtly wrong, when a user ran it.
 
 So this pushes kissmon's *own* encoder into the *real* firmware, hosted by
-tests/kiss-server, and reads the configuration back. If the two disagree about
-the wire format, the modem reports the old values and this fails.
+tests/kiss-server, and reads the result back. If the two disagree about the wire
+format, the modem reports the old values and this fails.
+
+SetRadio is the motivating case, and the one whose failure looked exactly like a
+firmware bug: SF10 is the byte 0x0A, and asking for it made the modem report
+SF13 and CR10 until kiss-server's Windows text mode was found rewriting 0x0A as
+0x0D 0x0A. Alongside it: signed transmit power, the random-length bounds, and an
+airtime wider than 16 bits.
 """
 
 import importlib.util
@@ -49,7 +55,7 @@ def build_set_radio_frame(kissmon, freq, bw, sf, cr):
     )
 
 
-class SetRadioRoundTripTests(unittest.TestCase):
+class KissmonAgainstFirmwareTests(unittest.TestCase):
     """Against the firmware itself, not a reimplementation of it."""
 
     @classmethod
@@ -97,7 +103,16 @@ class SetRadioRoundTripTests(unittest.TestCase):
             self.proc.kill()
         if self.proc.stdin is not None:
             self.proc.stdin.close()
+
+        # Killing the process ends the pipe, so the pump thread sees EOF and
+        # returns; only then is it safe to close its end. Closing earlier raises
+        # inside the thread, which surfaces as a ResourceWarning in the output of
+        # an otherwise passing run.
         self.proc.wait(timeout=10)
+        self.reader.join(timeout=5)
+
+        if self.proc.stdout is not None:
+            self.proc.stdout.close()
 
     def send_and_drain(self, frame, settle=0.4):
         """Send a frame and collect whatever comes back, failing on a rejection.
@@ -120,10 +135,28 @@ class SetRadioRoundTripTests(unittest.TestCase):
                 self.fail("kiss-server exited unexpectedly")
 
             cmd_in, body = item
-            if cmd_in == ERROR and body and body[0]:
-                self.fail(f"the modem rejected the command: error 0x{body[0]:02X}")
+            code = self.error_code(cmd_in, body)
+            if code is not None:
+                self.fail(f"the modem rejected the command: error 0x{code:02X}")
 
-    def ask_sub(self, sub, timeout=10.0):
+    def error_code(self, cmd_in, body):
+        """The error code from a rejection, or None.
+
+        A rejection arrives as SetHardware with sub-command 0xF1 followed by the
+        code, so the frame's own command byte is 0x06 like every other reply --
+        looking for 0xF1 as the command finds nothing, which is why the first
+        version of this harness sat waiting for a rejection that had already
+        arrived.
+        """
+        if (
+            cmd_in == self.kissmon.CMD_SETHARDWARE
+            and len(body) >= 2
+            and body[0] == ERROR
+        ):
+            return body[1]
+        return None
+
+    def ask_sub(self, sub, payload=b"", timeout=10.0):
         """Send a SetHardware query and return its reply payload, sub-byte removed.
 
         Two details cost this test a few wrong turns, so they are spelled out:
@@ -137,7 +170,9 @@ class SetRadioRoundTripTests(unittest.TestCase):
         the way kissmon does.
         """
         self.proc.stdin.write(
-            self.kissmon.encode(self.kissmon.CMD_SETHARDWARE, bytes((sub,)))
+            self.kissmon.encode(
+                self.kissmon.CMD_SETHARDWARE, bytes((sub,)) + payload
+            )
         )
         self.proc.stdin.flush()
 
@@ -152,9 +187,10 @@ class SetRadioRoundTripTests(unittest.TestCase):
                 self.fail("kiss-server exited before replying")
 
             cmd_in, body = item
-            if cmd_in == ERROR and body and body[0]:
+            code = self.error_code(cmd_in, body)
+            if code is not None:
                 self.fail(
-                    f"the modem rejected query 0x{sub:02X}: error 0x{body[0]:02X}"
+                    f"the modem rejected query 0x{sub:02X}: error 0x{code:02X}"
                 )
 
             matched = (
@@ -166,6 +202,138 @@ class SetRadioRoundTripTests(unittest.TestCase):
                 return body[1:]
 
         raise AssertionError(f"no reply to sub-command 0x{sub:02X} within {timeout}s")
+
+    def expect_error(self, sub, payload=b"", timeout=10.0):
+        """Send a command that should be rejected and return the error code.
+
+        The firmware validates its inputs, and a rejection is part of the
+        contract with kissmon: it has to arrive as a 0xF1 carrying a code, not as
+        silence and not as a plausible-looking reply.
+        """
+        self.proc.stdin.write(
+            self.kissmon.encode(self.kissmon.CMD_SETHARDWARE, bytes((sub,)) + payload)
+        )
+        self.proc.stdin.flush()
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                item = self.frames.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            if item is None:
+                self.fail("kiss-server exited before replying")
+
+            cmd_in, body = item
+            code = self.error_code(cmd_in, body)
+            if code is not None:
+                return code
+
+        raise AssertionError(
+            f"sub-command 0x{sub:02X} should have been rejected, but nothing "
+            f"came back"
+        )
+
+    def set_tx_power(self, dbm):
+        """Exactly what kissmon's `set-tx-power` puts on the wire."""
+        self.send_and_drain(
+            self.kissmon.encode(
+                self.kissmon.CMD_SETHARDWARE,
+                bytes((self.kissmon.HW_CMD["set-tx-power"],))
+                + struct.pack("b", dbm),
+            )
+        )
+        return self.ask_sub(self.kissmon.HW_CMD["get-tx-power"])
+
+    def test_set_tx_power_round_trips_including_negative_values(self):
+        """The wire carries a signed byte, and the modem has to agree.
+
+        struct.pack("b", ...) is signed on purpose: transmit power is routinely
+        negative, and an unsigned read would turn -3 dBm into 253.
+        """
+        for dbm in (17, 0, -3, -17):
+            power = self.set_tx_power(dbm)
+
+            self.assertEqual(
+                1,
+                len(power),
+                f"get-tx-power should carry one byte, got {power!r}",
+            )
+            self.assertEqual(
+                dbm,
+                struct.unpack("b", power)[0],
+                f"the modem did not keep {dbm} dBm",
+            )
+
+    def test_get_random_returns_exactly_what_was_asked_for(self):
+        """The lengths kissmon's `info` command sends, plus the maximum."""
+        for length in (1, 8, 32, 64):
+            payload = self.ask_sub(
+                self.kissmon.HW_CMD["get-random"], bytes((length,))
+            )
+
+            self.assertEqual(
+                length,
+                len(payload),
+                f"asked for {length} random bytes and got {len(payload)}",
+            )
+
+    def test_get_random_rejects_lengths_outside_one_to_64(self):
+        """The firmware's own bounds, checked from the outside.
+
+        It answers a bad length with an error rather than silence, and it has
+        to: kissmon reports the error to the user, so an empty reply would leave
+        `kissmon info` looking like a modem that had stopped answering.
+        """
+        for length in (0, 65, 255):
+            code = self.expect_error(
+                self.kissmon.HW_CMD["get-random"], bytes((length,))
+            )
+
+            self.assertEqual(
+                0x02,
+                code,
+                f"length {length} is out of range, so expect INVALID_PARAM",
+            )
+
+    def test_get_airtime_replies_with_four_bytes(self):
+        """A uint32, so a payload long enough to take over a minute still fits.
+
+        255 bytes at SF8 on a 62.5 kHz channel is several minutes of air time,
+        well past what a uint16 would hold, and the host stub always answers
+        100 ms, so only the width is checked here. The decoding is checked
+        separately, below, where the value can be made large on purpose.
+        """
+        for length in (1, 64, 200):
+            payload = self.ask_sub(
+                self.kissmon.HW_CMD["get-airtime"], bytes((length,))
+            )
+
+            self.assertEqual(
+                4,
+                len(payload),
+                f"airtime for {length} bytes should be a uint32, got {payload!r}",
+            )
+
+    def test_airtime_over_65535_ms_is_not_wrapped(self):
+        """A value a uint16 would have truncated, decoded the way kissmon does.
+
+        Built by hand rather than asked of the modem, because the radio stub
+        answers a fixed 100 ms and so cannot produce one. If kissmon ever unpacked
+        two bytes here, this reports 3 ms instead of 267000 and nothing else in
+        the suite would notice.
+        """
+        airtime_ms = 267_000
+        reply = (
+            bytes([0x8F])
+            + struct.pack("<I", airtime_ms)
+        )
+
+        line = self.kissmon.describe(self.kissmon.CMD_SETHARDWARE, reply)
+
+        self.assertIn(str(airtime_ms), line)
+        self.assertNotIn("3704", line, "that is 267000 modulo 65536, i.e. wrapped")
 
     def test_kissmon_can_configure_the_radio(self):
         kissmon = self.kissmon
