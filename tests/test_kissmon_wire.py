@@ -21,6 +21,7 @@ airtime wider than 16 bits.
 import importlib.util
 import pathlib
 import queue
+import re
 import struct
 import subprocess
 import threading
@@ -444,6 +445,98 @@ class KissmonAgainstFirmwareTests(unittest.TestCase):
         payload = struct.pack("<II", EU_FREQ, EU_BW) + bytes((EU_SF, EU_CR))
 
         self.assertEqual(10, len(payload))
+
+
+class KissmonTablesMatchTheFirmwareTests(unittest.TestCase):
+    """kissmon's lookup tables, compared with the firmware's own headers.
+
+    Both tables are hand-maintained on two sides of the repo, and nothing
+    connected them. Get one wrong and the symptom is silence rather than an
+    error: a command sent under the wrong id is answered with 0xF1 unknown-cmd,
+    or not answered at all, and a mislabelled error code prints a confident,
+    wrong explanation for whatever actually went wrong.
+
+    The comparison runs one way on purpose. kissmon exposes a subset of what the
+    firmware can do, which is fine; what must not happen is kissmon offering a
+    command under an id the firmware does not use, or renaming an error the
+    firmware can send.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.kissmon = load_kissmon()
+
+        header = (ROOT / "firmware" / "src" / "kiss.h").read_text(encoding="utf-8")
+
+        cls.commands = {
+            name.lower().replace("_", "-"): int(value, 16)
+            for name, value in re.findall(
+                r"#define\s+HW_CMD_(\w+)\s+(0x[0-9A-Fa-f]+)", header
+            )
+        }
+        cls.errors = {
+            name.lower().replace("_", "-"): int(value, 16)
+            for name, value in re.findall(
+                r"#define\s+HW_ERR_(\w+)\s+(0x[0-9A-Fa-f]+)", header
+            )
+        }
+
+    def test_the_headers_were_parsed(self):
+        self.assertTrue(self.commands, "no HW_CMD_ constants were read from kiss.h")
+        self.assertTrue(self.errors, "no HW_ERR_ constants were read from kiss.h")
+
+    def test_every_command_kissmon_offers_uses_the_firmware_id(self):
+        wrong = {
+            name: (hex(value), hex(self.commands[slug]))
+            for name, value in self.kissmon.HW_CMD.items()
+            if (slug := name.lower().replace("_", "-")) in self.commands
+            and self.commands[slug] != value
+        }
+
+        self.assertEqual(
+            {},
+            wrong,
+            "kissmon would send these under the wrong command id, and the modem "
+            "would answer unknown-cmd",
+        )
+
+    def test_every_command_kissmon_offers_exists_in_the_firmware(self):
+        unknown = sorted(set(self.kissmon.HW_CMD) - set(self.commands))
+
+        self.assertEqual(
+            [],
+            unknown,
+            "kissmon offers commands the firmware does not define, so they would "
+            "be answered with unknown-cmd",
+        )
+
+    def test_every_error_kissmon_names_matches_the_firmware_code(self):
+        wrong = {
+            name: (value, hex(self.errors[name]))
+            for value, name in self.kissmon.ERR.items()
+            if name in self.errors and self.errors[name] != value
+        }
+
+        self.assertEqual(
+            {},
+            wrong,
+            "kissmon would report these errors under the wrong code, so the "
+            "explanation it prints would be for a different problem",
+        )
+
+    def test_every_error_the_firmware_can_send_is_named(self):
+        unnamed = sorted(
+            slug
+            for slug, value in self.errors.items()
+            if value not in self.kissmon.ERR
+        )
+
+        self.assertEqual(
+            [],
+            unnamed,
+            "the firmware can send these errors and kissmon has no name for "
+            "them, so it would print a bare hex code",
+        )
 
 
 if __name__ == "__main__":
