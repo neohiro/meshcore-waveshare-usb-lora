@@ -1,0 +1,81 @@
+name: CI
+
+# The gate is the same one a contributor runs locally: tools/ci.ps1 builds both
+# board variants, runs the firmware's protocol logic natively, checks the modem
+# against meshcore-go, and runs the Python tests and lint. Keeping it identical
+# matters -- a second, CI-only definition of "passing" is a definition that drifts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push makes an in-flight run for the same ref irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Full gate (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ~100 MB of cross compiler. Keyed on the fetch script, so changing how it
+      # downloads invalidates the cache rather than reusing a stale toolchain.
+      - name: Cache the ARM toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: arm-gcc-${{ hashFiles('tools/fetch-toolchain.ps1') }}
+
+      # The native tests execute the firmware's protocol logic on the host, which
+      # the ARM cross compiler cannot do. The runner has MSVC but no gcc, and
+      # test.ps1 throws without one. Single-line commands on purpose: a folded
+      # or literal block scalar is easy to break and hard to review here.
+      - name: Install make
+        run: choco install make --no-progress --yes
+        shell: pwsh
+
+      - name: Install a host gcc
+        run: choco install mingw --no-progress --yes
+        shell: pwsh
+
+      - name: Put mingw on PATH for later steps
+        run: echo "C:\ProgramData\mingw64\mingw64\bin" >> $env:GITHUB_PATH
+        shell: pwsh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/contract/go.mod
+
+      # ci.ps1 skips the contract test and the lint when go and ruff are absent.
+      # -Strict turns those skips into failures, so both have to be really here.
+      - name: Install ruff
+        run: python -m pip install --upgrade ruff
+        shell: pwsh
+
+      # If any of these is missing, find out here rather than as a baffling
+      # failure three steps later.
+      - name: Report the toolchain
+        run: python --version; go version; ruff --version; make --version; gcc --version
+        shell: pwsh
+
+      - name: Fetch the ARM toolchain
+        run: tools/fetch-toolchain.ps1
+        shell: pwsh
+
+      - name: Run the gate
+        run: tools/ci.ps1 -Strict
+        shell: pwsh
