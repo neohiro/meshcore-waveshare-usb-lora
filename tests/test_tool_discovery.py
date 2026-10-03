@@ -17,9 +17,11 @@ compiler is needed rather than the ARM cross compiler, explains why, and gives
 the exact winget command. That is the standard every other message should meet.
 """
 
+import ast
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -592,6 +594,110 @@ class ScriptsMustRunWithoutArgumentsTests(unittest.TestCase):
             "fetch-toolchain.ps1 -Dest",
             text,
             "the example should not need a destination, because the default is right",
+        )
+
+
+class PythonImportsAreDeclaredTests(unittest.TestCase):
+    """Every third-party import must appear in requirements-dev.txt.
+
+    This is here because of a real failure. The first Actions run reached the
+    Python tests and died on "This tool needs pyserial": three tools import
+    serial, and nothing in the gate installed or checked for it. Locally it was
+    always present, because setup.ps1 installs it on the way to flashing, so the
+    gate had been quietly depending on a side effect of a different script.
+
+    Reading the imports and reading the requirements file is the only way to
+    notice the next one, and it needs no network.
+    """
+
+    # Modules whose distribution name differs from the module name.
+    ALIASES = {"serial": "pyserial"}
+
+    def requirements(self):
+        text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+
+        # Strip comments, then take the distribution name from "name>=1.2".
+        names = set()
+        for line in text.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            names.add(re.split(r"[<>=!~\[; ]", line, maxsplit=1)[0].strip().lower())
+
+        return names
+
+    def imported_modules(self):
+        """Real imports only, via ast.
+
+        A regular expression over the source also matches prose: this file's own
+        docstrings contain the words "from" and "import", and the first version
+        of this reported a module named "the".
+        """
+        found = {}
+
+        paths = list(TOOLS.glob("*.py")) + list((ROOT / "tests").glob("*.py"))
+
+        for path in sorted(paths):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    # level > 0 is a relative import, so it stays in this package.
+                    modules = (
+                        [node.module] if node.module and not node.level else []
+                    )
+                else:
+                    modules = []
+
+                for module in modules:
+                    top = module.split(".")[0]
+                    if top:
+                        found.setdefault(top, set()).add(path.name)
+
+        return found
+
+    def test_no_third_party_import_is_undeclared(self):
+        declared = self.requirements()
+        stdlib = set(sys.stdlib_module_names)
+
+        # This repository's own modules: the sibling .py files, and the
+        # top-level directories, which are importable as namespace packages --
+        # test_mutation.py does `from tests import mutation` and there is no
+        # tests/__init__.py.
+        local = {
+            p.stem
+            for p in list(TOOLS.glob("*.py")) + list((ROOT / "tests").glob("*.py"))
+        } | {d.name for d in ROOT.iterdir() if d.is_dir()}
+
+        undeclared = {}
+
+        for module, users in self.imported_modules().items():
+            if module in stdlib or module in local:
+                continue
+            distribution = self.ALIASES.get(module, module).lower()
+            if distribution not in declared:
+                undeclared[distribution] = sorted(users)
+
+        self.assertEqual(
+            {},
+            undeclared,
+            "these imports are not in requirements-dev.txt, so a clean checkout "
+            "would fail the way the first CI run did",
+        )
+
+    def test_the_import_scan_actually_found_something(self):
+        """Otherwise the check above passes without having looked at anything."""
+        found = self.imported_modules()
+
+        self.assertIn("serial", found, "the scan should still see kissmon's import")
+        self.assertIn("unittest", found, "the scan should see the stdlib too")
+
+    def test_requirements_file_is_not_empty(self):
+        self.assertTrue(
+            self.requirements(),
+            "requirements-dev.txt parsed to nothing, so nothing is declared",
         )
 
 
