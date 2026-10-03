@@ -569,7 +569,7 @@ powershell -ExecutionPolicy Bypass -File tools\ci.ps1
 It builds the firmware for the GD32F103 in both board variants, runs the
 firmware's protocol logic on the host, checks the modem against meshcore-go,
 runs the Python tests, and lints the Python. That is about 60,347 host-side
-protocol assertions, 10 contract tests, and 237 Python tests. Those three counts
+protocol assertions, 10 contract tests, and 239 Python tests. Those three counts
 are checked against reality by `tests/test_readme_claims.py`, so they cannot go
 stale after a test is added.
 

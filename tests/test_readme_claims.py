@@ -118,5 +118,74 @@ class ReadmeCountsTests(unittest.TestCase):
         )
 
 
+class ReadmeCommandsAreRealTests(unittest.TestCase):
+    """Every kissmon invocation in the README must name a real subcommand.
+
+    The manual sequence in the README is what a first-time user follows, and a
+    command that does not exist fails with argparse's "invalid choice" before
+    anything useful happens. Nothing connected the documented commands to
+    kissmon's subparsers, so a rename on either side would have gone unnoticed.
+
+    Only fenced code blocks are considered, and only invocations that name an
+    interpreter. The README also mentions `kissmon` in prose ("kissmon info will
+    work against it, so the bring-up steps below...") and lists the file in the
+    layout table ("kissmon.py   bring-up client: info, monitor, setradio, tx"),
+    where the next word describes the file instead of being a command. Scanning
+    for the bare filename reported a command called "bring-up" from both.
+    """
+
+    SUBCOMMANDS = ("info", "setradio", "monitor", "tx", "raw")
+
+    # python tools\kissmon.py ..., py -m tools.kissmon ..., and so on.
+    INVOCATION = re.compile(r"(?:python|py)\s+\S*kissmon\.py((?:\s+\S+)*)")
+
+    def code_blocks(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        return re.findall(r"^```.*?$(.*?)^```", text, re.S | re.M)
+
+    def documented_commands(self):
+        found = set()
+
+        for block in self.code_blocks():
+            for match in self.INVOCATION.finditer(block):
+                arguments = match.group(1).split()
+                # Skip past the options and their values to the subcommand.
+                index = 0
+                while index < len(arguments):
+                    token = arguments[index]
+                    if not token.startswith("-"):
+                        break
+                    takes_value = (
+                        "=" not in token
+                        and index + 1 < len(arguments)
+                        and not arguments[index + 1].startswith("-")
+                    )
+                    # An option that takes a value consumes the next token.
+                    index += 2 if takes_value else 1
+
+                if index < len(arguments):
+                    found.add(arguments[index])
+
+        return found
+
+    def test_the_scan_found_the_documented_commands(self):
+        self.assertEqual(
+            {"info", "monitor", "setradio"},
+            self.documented_commands(),
+            "the scan should find the three commands the README's code blocks "
+            "run; if this fails the check below is not looking at anything",
+        )
+
+    def test_every_documented_command_exists(self):
+        unknown = sorted(self.documented_commands() - set(self.SUBCOMMANDS))
+
+        self.assertEqual(
+            [],
+            unknown,
+            "the README tells the reader to run kissmon commands that do not "
+            f"exist; kissmon offers {', '.join(self.SUBCOMMANDS)}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
