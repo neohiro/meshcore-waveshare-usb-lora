@@ -19,7 +19,7 @@
     powershell -File tools\fetch-toolchain.ps1
 #>
 param(
-    [string]$Dest
+    [string]$Dest = (Join-Path (Split-Path -Parent $PSScriptRoot) 'toolchain')
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'

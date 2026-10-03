@@ -526,5 +526,74 @@ class ToolchainFetchBehaviourTests(unittest.TestCase):
         )
 
 
+class ScriptsMustRunWithoutArgumentsTests(unittest.TestCase):
+    """A script documented as `tools\\name.ps1` has to accept no arguments.
+
+    Every one of these is invoked bare somewhere a reader will copy from: the
+    README, setup.ps1's help, and build.ps1's own "run tools\\fetch-toolchain.ps1
+    first" message. A non-switch parameter with no default makes that documented
+    command fail at parameter binding, and PowerShell's report of it names the
+    wrong thing entirely -- fetch-toolchain.ps1 said "Cannot bind argument to
+    parameter 'Path' because it is an empty string", which never mentions that
+    the caller left out a parameter the documentation told them to leave out.
+
+    That is not hypothetical: it is how the first GitHub Actions run failed, on a
+    runner with no toolchain present. It could not happen locally, because the
+    toolchain was already there.
+    """
+
+    # [type]$Name optionally followed by "=", up to the next comma or newline.
+    DECLARATION = re.compile(
+        r"\[(string|int|long|switch)\]\s*\$(\w+)\s*(=|,|\r?\n|$)"
+    )
+
+    def test_no_non_switch_parameter_is_required(self):
+        for name in SCRIPTS:
+            text = script_text(name)
+
+            param = re.search(r"^param\((.*?)^\)", text, re.S | re.M)
+            self.assertIsNotNone(
+                param, f"{name} should declare its parameters in a param() block"
+            )
+
+            for kind, param_name, terminator in self.DECLARATION.findall(
+                param.group(1)
+            ):
+                if kind == "switch":
+                    continue
+
+                self.assertEqual(
+                    "=",
+                    terminator,
+                    f"{name}'s ${param_name} has no default, so the documented "
+                    f"bare invocation `tools\\{name}` cannot work",
+                )
+
+    def test_the_declarations_were_actually_found(self):
+        """Guards the test above against matching nothing and passing vacuously."""
+        for name in SCRIPTS:
+            param = re.search(
+                r"^param\((.*?)^\)", script_text(name), re.S | re.M
+            )
+            found = self.DECLARATION.findall(param.group(1))
+
+            self.assertTrue(
+                found,
+                f"no parameter declarations were recognised in {name}, so the "
+                f"check above would pass without looking at anything",
+            )
+
+    def test_the_documented_invocation_is_the_bare_one(self):
+        """The fetch script's own help must not promise a form that fails."""
+        text = script_text("fetch-toolchain.ps1")
+
+        self.assertIn("powershell -File tools\\fetch-toolchain.ps1", text)
+        self.assertNotIn(
+            "fetch-toolchain.ps1 -Dest",
+            text,
+            "the example should not need a destination, because the default is right",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
