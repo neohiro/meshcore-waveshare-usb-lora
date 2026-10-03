@@ -1,5 +1,21 @@
 # meshcore-waveshare-usb-lora
 
+> [!WARNING]
+> **This board cannot be flashed over USB alone, and no software can change
+> that.** The GD32F103's `BOOT0` pin is unconnected, the CH343's `DTR`/`RTS` lines
+> go nowhere, and the ROM ISP bootloader answers at none of the baud rates tried.
+> There is no USB-only flashing path, so before you start you need **one of**:
+>
+> - **An SWD debug probe** — CMSIS-DAP, DAPLink or ST-Link V2, about €3–5 — plus
+>   four wires to the `3V3 / GND / SWDIO / SWCLK` pads. The probe is generic and
+>   also flashes a dozen other boards.
+> - **A board MeshCore already supports.** Heltec V3 flashes over Web Serial with
+>   no probe at all; the Waveshare RP2040-LoRa-HF takes a `.uf2` drag-and-drop.
+>
+> Read [What you have to supply in hardware](#what-you-have-to-supply-in-hardware)
+> before buying anything, and [Flashing](#flashing) for the measurements behind
+> this warning.
+
 Turns a stock Waveshare USB-TO-LoRa-HF (SKU 24515 family) into a MeshCore
 **KISS modem**: the SX1262 radio runs on the dongle, and the MeshCore protocol
 stack runs on your PC so a bot can use it.
@@ -548,7 +564,7 @@ powershell -ExecutionPolicy Bypass -File tools\ci.ps1
 It builds the firmware for the GD32F103 in both board variants, runs the
 firmware's protocol logic on the host, checks the modem against meshcore-go,
 runs the Python tests, and lints the Python. That is about 60,347 host-side
-protocol assertions, 10 contract tests, and 215 Python tests. Those three counts
+protocol assertions, 10 contract tests, and 221 Python tests. Those three counts
 are checked against reality by `tests/test_readme_claims.py`, so they cannot go
 stale after a test is added.
 

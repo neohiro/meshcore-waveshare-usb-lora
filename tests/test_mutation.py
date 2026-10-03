@@ -15,9 +15,8 @@ import pathlib
 import tempfile
 import unittest
 
-from tests.mutation import MutationError
-
 from tests import mutation
+from tests.mutation import MutationError
 
 SAMPLE = """line one
 target line

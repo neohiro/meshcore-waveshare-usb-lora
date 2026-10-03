@@ -45,6 +45,8 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <io.h>
+#include <fcntl.h>
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -334,6 +336,19 @@ static void serve_tcp(int port)
 
 int main(int argc, char** argv)
 {
+    // Binary mode, or the C runtime rewrites the bytes we are forwarding.
+    // Windows opens stdin/stdout in text mode, where a lone 0x0A becomes 0x0D
+    // 0x0A on the way out and 0x0D 0x0A collapses to 0x0A on the way in. This
+    // stream carries KISS frames, so any payload containing 0x0A -- or 0x0D
+    // followed by 0x0A -- is silently corrupted. It stayed hidden because the
+    // presets people usually try happen to contain no 0x0A: SF10 arrives as
+    // 0x0A and came back as 0x0D 0x0A, which read back as SF13 and CR10.
+    // The TCP mode below was never affected, since sockets are already binary.
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     setvbuf(stdout, NULL, _IONBF, 0);
 
     // -1 means "no --tcp given". It cannot be 0, because 0 is a valid request:
