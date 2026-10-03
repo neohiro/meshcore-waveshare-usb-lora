@@ -1,5 +1,7 @@
 # meshcore-waveshare-usb-lora
 
+[![CI](https://github.com/neohiro/meshcore-waveshare-usb-lora/actions/workflows/ci.yml/badge.svg)](https://github.com/neohiro/meshcore-waveshare-usb-lora/actions/workflows/ci.yml)
+
 > [!WARNING]
 > **This board cannot be flashed over USB alone, and no software can change
 > that.** The GD32F103's `BOOT0` pin is unconnected, the CH343's `DTR`/`RTS` lines
