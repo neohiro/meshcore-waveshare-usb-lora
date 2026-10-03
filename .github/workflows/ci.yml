@@ -62,8 +62,10 @@ jobs:
 
       # ci.ps1 skips the contract test and the lint when go and ruff are absent.
       # -Strict turns those skips into failures, so both have to be really here.
-      - name: Install ruff
-        run: python -m pip install --upgrade ruff
+      # requirements-dev.txt is the project's declared list; it also carries
+      # pyserial, which the Python tests import and which nothing else installs.
+      - name: Install the Python dependencies
+        run: python -m pip install --upgrade -r requirements-dev.txt
         shell: pwsh
 
       # If any of these is missing, find out here rather than as a baffling

@@ -372,7 +372,10 @@ PowerShell:
 
 - The dongle, with its antenna
 - This repository
-- Python 3.8+ with `pyserial`: `pip install pyserial`
+- Python 3.8+ and the packages in `requirements-dev.txt`:
+  `pip install -r requirements-dev.txt` — that is `pyserial` for `kissmon.py`,
+  `find_port.py` and `gd32_isp.py`, plus `ruff` for the lint step and `pyocd` for
+  flashing. `tools/ci.ps1` checks for them and names that file if one is missing.
 - `make` — `winget install --id ezwinports.make --scope user`
 - Git for Windows (libopencm3's build shells out to `printf` and `python3`)
 - A host C compiler, for the native tests in `tools/test.ps1` —
@@ -389,10 +392,10 @@ Everything else, including the ARM compiler, is fetched into this folder.
 Flashing additionally needs the SWD probe from the hardware list above;
 `tools/flash-swd.ps1` installs pyOCD itself and prints the wiring.
 
-Two more are optional, and the scripts degrade rather than fail without them:
-`ruff` for the lint step (`pip install ruff`; otherwise CI reports
-`ruff not installed, skipping`) and `pyocd` for flashing, which
-`tools/flash-swd.ps1` installs for you.
+The last two degrade rather than fail if you skip them: without `ruff` the lint
+step reports `ruff not installed, skipping`, though `tools/ci.ps1 -Strict` turns
+that skip into a failure, which is how CI runs. `pyocd` is installed on demand by
+`tools/flash-swd.ps1`, so you only need it if you flash.
 
 ## Build
 

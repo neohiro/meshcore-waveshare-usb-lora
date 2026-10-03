@@ -1,0 +1,16 @@
+# Python packages needed to work on this project.
+#
+#   python -m pip install -r requirements-dev.txt
+#
+# tools/ci.ps1 checks for these and names this file if one is missing, so a
+# fresh clone does not have to guess. Nothing else installs them.
+
+# kissmon.py, find_port.py and gd32_isp.py all talk to serial ports.
+pyserial>=3.5
+
+# The lint step in tools/ci.ps1.
+ruff>=0.6
+
+# tools/flash-swd.ps1 installs this on demand; listed so a contributor who wants
+# to flash does not discover it mid-run.
+pyocd>=0.36

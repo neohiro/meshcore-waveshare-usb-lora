@@ -49,7 +49,44 @@ function Invoke-Step {
     $script:results += [pscustomobject]@{ Step = $Name; Result = 'ok' }
 }
 
-# 1. The firmware itself, cross compiled for the GD32F103. Both board variants
+# 1. The Python packages the tests import. Checked first and on its own so that a
+#    missing one is reported in a second rather than after two firmware builds,
+#    and named exactly, because the failure otherwise surfaces deep inside the
+#    test run as an import error in whichever tool happened to need it first.
+Invoke-Step 'python dependencies' {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+
+    if (-not $python) {
+        throw 'python not found. Install it with: winget install --id Python.Python.3.12'
+    }
+
+    # One trivial import per module rather than a -c script: PowerShell rewrites
+    # a multi-line argument when it hands one to a native executable, and a here-
+    # string passed to python -c arrives as a SyntaxError.
+    $missing = @()
+
+    foreach ($module in @('serial')) {
+        & $python.Source -c "import $module"
+        if ($LASTEXITCODE -ne 0) {
+            $missing += $module
+        }
+    }
+
+    if ($missing) {
+        throw @"
+Python package(s) missing: $($missing -join ', ')
+
+They are declared in requirements-dev.txt. Install them with:
+    python -m pip install -r requirements-dev.txt
+
+pyserial is needed by kissmon.py, find_port.py and gd32_isp.py.
+"@
+    }
+
+    Write-Output 'python dependencies present'
+}
+
+# 2. The firmware itself, cross compiled for the GD32F103. Both board variants
 #    are built because the README documents the XTAL one, and an instruction
 #    that no longer compiles is worse than none.
 Invoke-Step 'firmware build' {
@@ -92,13 +129,13 @@ Invoke-Step 'firmware build' {
     Write-Output "firmware.bin is the $leftBehind variant ($($hashes[$leftBehind]))"
 }
 
-# 2. The firmware's protocol logic, compiled for the host and executed.
+# 3. The firmware's protocol logic, compiled for the host and executed.
 Invoke-Step 'native firmware tests' {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
         (Join-Path $Profile 'tools\test.ps1') -Profile $Profile
 }
 
-# 3. The modem firmware against meshcore-go, the bot that drives it.
+# 4. The modem firmware against meshcore-go, the bot that drives it.
 Invoke-Step 'contract test' {
     $go = Get-Command go -ErrorAction SilentlyContinue
 
@@ -199,7 +236,7 @@ Invoke-Step 'contract test' {
     }
 }
 
-# 4. The Python tooling.
+# 5. The Python tooling.
 Invoke-Step 'python tests' {
     Push-Location $Profile
     try {
@@ -209,7 +246,7 @@ Invoke-Step 'python tests' {
     }
 }
 
-# 5. Lint the Python.
+# 6. Lint the Python.
 Invoke-Step 'ruff lint' {
     $ruff = Get-Command ruff -ErrorAction SilentlyContinue
 
