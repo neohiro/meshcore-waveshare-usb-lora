@@ -19,9 +19,12 @@ so this checks three things:
 import contextlib
 import importlib.util
 import io
+import os
 import pathlib
 import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -293,6 +296,109 @@ class SetupStructureTests(unittest.TestCase):
             code,
             r"Get-Command\s+'sh'",
             "setup.ps1 must not look for sh on PATH; build.ps1 owns that check",
+        )
+
+
+class RunBotSurvivesAVainInstallTests(unittest.TestCase):
+    """What happens when `go install` succeeds without producing a binary.
+
+    The script used to pick a path and run it, so a GOBIN that was quietly
+    ignored turned into a shell error naming neither the module nor the
+    directory. Driven with a stub `go` that exits 0 and writes nothing, which is
+    exactly the case that could not otherwise be reproduced on demand.
+    """
+
+    def setUp(self):
+        if not RUN_BOT.exists():
+            raise unittest.SkipTest("run-bot.ps1 not present")
+
+        self.tmp = tempfile.mkdtemp(prefix="run-bot-vain-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+        # run-bot.ps1 resolves everything from $PSScriptRoot, so a copy in an
+        # otherwise empty tree exercises the real script without touching the
+        # repository's own tools/bin.
+        shutil.copy2(RUN_BOT, os.path.join(self.tmp, "run-bot.ps1"))
+
+        repo = self.tmp
+        os.makedirs(os.path.join(repo, "firmware"))
+        os.makedirs(os.path.join(repo, "bot"))
+        os.makedirs(os.path.join(repo, "tools", "bin"), exist_ok=True)
+        # Both of these are checked before the bot is installed, so they have to
+        # be present for the run to reach the step under test. $Repo is
+        # $PSScriptRoot, so they belong beside the copied script.
+        pathlib.Path(repo, "firmware", "firmware.bin").write_bytes(b"")
+        pathlib.Path(repo, "bot", "config.toml").write_text(
+            "# not parsed by this test\n", encoding="utf-8"
+        )
+
+        stub_dir = os.path.join(self.tmp, "stub")
+        os.makedirs(stub_dir, exist_ok=True)
+        stub = os.path.join(stub_dir, "go.cmd")
+        with open(stub, "w", encoding="utf-8") as handle:
+            handle.write(
+                "@echo off\r\n"
+                "rem succeeds without writing anything\r\n"
+                "exit /b 0\r\n"
+            )
+
+        self.repo = repo
+
+    def run_bot(self):
+        env = dict(os.environ)
+        env["PATH"] = os.path.join(self.tmp, "stub") + os.pathsep + env["PATH"]
+
+        return subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                os.path.join(self.tmp, "run-bot.ps1"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+            cwd=self.repo,
+        )
+
+    def test_a_vain_install_is_reported_not_attempted(self):
+        result = self.run_bot()
+
+        self.assertNotEqual(
+            0,
+            result.returncode,
+            f"a `go install` that produced nothing must not report success:\n"
+            f"{result.stdout}\n{result.stderr}",
+        )
+
+    def test_the_message_says_where_it_looked_and_what_to_do(self):
+        result = self.run_bot()
+        output = result.stdout + result.stderr
+
+        self.assertIn(
+            "meshcore-bot is not in",
+            output,
+            f"the failure should name the directory it searched:\n{output}",
+        )
+        self.assertIn(
+            "go env GOBIN",
+            output,
+            f"the failure should say how to diagnose a GOBIN that was ignored:\n"
+            f"{output}",
+        )
+
+    def test_it_does_not_try_to_execute_the_missing_binary(self):
+        result = self.run_bot()
+        output = result.stdout + result.stderr
+
+        self.assertNotIn(
+            "Press Ctrl-C to stop",
+            output,
+            "the script announced a running bot, so it got past the check it "
+            f"should have stopped at:\n{output}",
         )
 
 

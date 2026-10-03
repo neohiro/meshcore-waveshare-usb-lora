@@ -70,7 +70,26 @@ if (-not ((Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $exeNoExt)))
     }
 }
 
-$bot = if (Test-Path -LiteralPath $exe) { $exe } else { $exeNoExt }
+# Checked rather than assumed. `go install` can exit 0 having written nothing --
+# a GOBIN it did not honour, a build cache that produced the binary somewhere
+# else -- and running a path that is not there fails with a shell error that
+# names neither the module nor the directory.
+$bot = if (Test-Path -LiteralPath $exe) {
+    $exe
+} elseif (Test-Path -LiteralPath $exeNoExt) {
+    $exeNoExt
+} else {
+    throw @"
+meshcore-bot is not in $Bin after installing $BotModule.
+
+`go install` reported success but left no binary there. Check that GOBIN is
+honoured by your Go installation:
+    go env GOBIN
+
+Then re-run, or build it by hand into that directory:
+    go build -o "$Bin\meshcore-bot.exe" $BotModule
+"@
+}
 
 Write-Host "Config : $Config" -ForegroundColor DarkGray
 Write-Host "Bot    : $bot ($BotVersion)" -ForegroundColor DarkGray
